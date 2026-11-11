@@ -1,0 +1,238 @@
+<?php
+declare(strict_types=1);
+require __DIR__ . '/includes/bootstrap.php';
+$user = require_roles(['admin', 'manager', 'receptionist', 'accountant']);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verify_csrf();
+    $action = (string) ($_POST['action'] ?? '');
+    $bookingId = filter_var($_POST['booking_id'] ?? null, FILTER_VALIDATE_INT);
+
+    if ($action === 'create') {
+        if (!in_array($user['role'], ['admin', 'manager', 'receptionist'], true)) {
+            http_response_code(403);
+            exit('You do not have permission to create bookings.');
+        }
+        $fullName = trim((string) ($_POST['full_name'] ?? ''));
+        $phone = trim((string) ($_POST['phone'] ?? ''));
+        $identity = trim((string) ($_POST['id_passport'] ?? ''));
+        $roomId = filter_var($_POST['room_id'] ?? null, FILTER_VALIDATE_INT);
+        $checkin = (string) ($_POST['checkin_date'] ?? '');
+        $checkout = (string) ($_POST['checkout_date'] ?? '');
+        $bookingStatus = (string) ($_POST['booking_status'] ?? 'confirmed');
+        $validDates = valid_date($checkin)
+            && valid_date($checkout)
+            && $checkin >= date('Y-m-d')
+            && $checkin < $checkout;
+
+        if ($fullName === '' || $phone === '' || !$roomId || !$validDates
+            || !in_array($bookingStatus, ['pending', 'confirmed'], true)) {
+            flash('Complete the guest, room, and valid stay details.', 'error');
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $roomStatement = $pdo->prepare('SELECT id, price, status FROM rooms WHERE id = ? FOR UPDATE');
+                $roomStatement->execute([$roomId]);
+                $room = $roomStatement->fetch();
+                $conflictStatement = $pdo->prepare(
+                    "SELECT COUNT(*) FROM bookings
+                     WHERE room_id = ? AND status IN ('pending', 'confirmed', 'checked_in')
+                     AND checkin_date < ? AND checkout_date > ?"
+                );
+                $conflictStatement->execute([$roomId, $checkout, $checkin]);
+                if (!$room || !in_array($room['status'], ['available', 'cleaned'], true) || (int) $conflictStatement->fetchColumn() > 0) {
+                    $pdo->rollBack();
+                    flash('That room is not available for the selected dates.', 'error');
+                } else {
+                    $guestStatement = $pdo->prepare(
+                        'INSERT INTO guests (full_name, phone, id_passport) VALUES (?, ?, ?)'
+                    );
+                    $guestStatement->execute([$fullName, $phone, $identity !== '' ? $identity : null]);
+                    $guestId = (int) $pdo->lastInsertId();
+                    $nights = (int) (new DateTime($checkin))->diff(new DateTime($checkout))->days;
+                    $total = $nights * (float) $room['price'];
+                    $bookingStatement = $pdo->prepare(
+                        "INSERT INTO bookings (guest_id, room_id, checkin_date, checkout_date, nightly_rate, total_amount, status)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)"
+                    );
+                    $bookingStatement->execute([$guestId, $roomId, $checkin, $checkout, $room['price'], $total, $bookingStatus]);
+                    $pdo->commit();
+                    flash(status_label($bookingStatus) . ' booking saved. Total: ' . money($total) . ' for ' . $nights . ' night(s).');
+                }
+            } catch (PDOException $exception) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $exception;
+            }
+        }
+        redirect('bookings.php');
+    }
+
+    if (!$bookingId) {
+        flash('Invalid booking.', 'error');
+        redirect('bookings.php');
+    }
+    if ($action === 'check_in') {
+        if (!in_array($user['role'], ['admin', 'manager', 'receptionist'], true)) {
+            http_response_code(403);
+            exit('You do not have permission to check guests in.');
+        }
+        $statement = $pdo->prepare(
+            "UPDATE bookings SET status = 'checked_in' WHERE id = ? AND status = 'confirmed'
+             AND checkin_date <= CURDATE() AND checkout_date > CURDATE()
+             AND EXISTS (SELECT 1 FROM rooms WHERE rooms.id = bookings.room_id AND rooms.status IN ('available', 'cleaned'))"
+        );
+        $statement->execute([$bookingId]);
+        flash($statement->rowCount() ? 'Guest checked in. Room status is now occupied.' : 'Check-in is not available for this booking today.', $statement->rowCount() ? 'success' : 'error');
+    } elseif ($action === 'confirm') {
+        if (!in_array($user['role'], ['admin', 'manager', 'receptionist'], true)) {
+            http_response_code(403);
+            exit('You do not have permission to confirm bookings.');
+        }
+        $statement = $pdo->prepare("UPDATE bookings SET status = 'confirmed' WHERE id = ? AND status = 'pending'");
+        $statement->execute([$bookingId]);
+        flash($statement->rowCount() ? 'Booking confirmed.' : 'This booking cannot be confirmed.', $statement->rowCount() ? 'success' : 'error');
+    } elseif ($action === 'check_out') {
+        if (!in_array($user['role'], ['admin', 'manager', 'receptionist'], true)) {
+            http_response_code(403);
+            exit('You do not have permission to check guests out.');
+        }
+        $method = (string) ($_POST['payment_method'] ?? '');
+        $methods = ['cash', 'mobile_money', 'card', 'bank'];
+        if (!in_array($method, $methods, true)) {
+            flash('Select a valid payment method.', 'error');
+        } else {
+            try {
+                $pdo->beginTransaction();
+                $statement = $pdo->prepare("SELECT total_amount FROM bookings WHERE id = ? AND status = 'checked_in' FOR UPDATE");
+                $statement->execute([$bookingId]);
+                $booking = $statement->fetch();
+                if (!$booking) {
+                    $pdo->rollBack();
+                    flash('Only checked-in guests can check out.', 'error');
+                } else {
+                    $paymentStatement = $pdo->prepare(
+                        'INSERT INTO payments (booking_id, amount, payment_method) VALUES (?, ?, ?)'
+                    );
+                    $paymentStatement->execute([$bookingId, $booking['total_amount'], $method]);
+                    $updateStatement = $pdo->prepare("UPDATE bookings SET status = 'checked_out' WHERE id = ?");
+                    $updateStatement->execute([$bookingId]);
+                    $roomStatement = $pdo->prepare(
+                        "UPDATE rooms SET status = 'cleaning'
+                         WHERE id = (SELECT room_id FROM bookings WHERE id = ?)"
+                    );
+                    $roomStatement->execute([$bookingId]);
+                    $pdo->commit();
+                    flash('Guest checked out. Payment of ' . money($booking['total_amount']) . ' recorded.');
+                }
+            } catch (PDOException $exception) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $exception;
+            }
+        }
+    } elseif ($action === 'cancel') {
+        if (!in_array($user['role'], ['admin', 'manager', 'receptionist'], true)) {
+            http_response_code(403);
+            exit('You do not have permission to cancel bookings.');
+        }
+        $statement = $pdo->prepare(
+            "UPDATE bookings SET status = 'cancelled' WHERE id = ? AND status IN ('pending', 'confirmed')"
+        );
+        $statement->execute([$bookingId]);
+        flash($statement->rowCount() ? 'Booking cancelled.' : 'This booking cannot be cancelled.', $statement->rowCount() ? 'success' : 'error');
+    }
+    redirect('bookings.php');
+}
+
+$rooms = $user['role'] === 'accountant'
+    ? []
+    : $pdo->query("SELECT id, room_number, room_type, price FROM rooms WHERE status IN ('available', 'cleaned') ORDER BY room_number")->fetchAll();
+$bookings = $user['role'] === 'accountant'
+    ? $pdo->query(
+        'SELECT b.*, r.room_number
+         FROM bookings b
+         JOIN rooms r ON r.id = b.room_id
+         ORDER BY b.created_at DESC'
+    )->fetchAll()
+    : $pdo->query(
+        'SELECT b.*, g.full_name, g.phone, r.room_number
+         FROM bookings b
+         JOIN guests g ON g.id = b.guest_id
+         JOIN rooms r ON r.id = b.room_id
+         ORDER BY b.created_at DESC'
+    )->fetchAll();
+$pageTitle = 'Bookings';
+require __DIR__ . '/includes/layout.php';
+?>
+<div class="welcome-row">
+    <div><h2>Bookings & stays</h2><p>Reserve rooms, check guests in, and record checkout payments.</p></div>
+    <?php if ($user['role'] !== 'accountant'): ?><a class="button button-primary" href="#new-booking">＋ New booking</a><?php endif; ?>
+</div>
+<section class="panel table-panel">
+    <div class="panel-heading"><div><h2>All bookings <span class="count-pill"><?= count($bookings) ?></span></h2><p>Room rates are saved with each booking.</p></div></div>
+    <?php if (!$bookings): ?>
+        <div class="empty-state"><strong>No bookings yet</strong><p>Create your first guest reservation below.</p></div>
+    <?php else: ?>
+        <div class="table-wrap"><table><thead><tr><th>GUEST</th><th>ROOM</th><th>STAY</th><th>TOTAL</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>
+        <?php foreach ($bookings as $booking): ?>
+            <tr>
+                <td>
+                    <strong><?= $user['role'] === 'accountant' ? 'Booking #' . (int) $booking['id'] : e($booking['full_name']) ?></strong>
+                    <?php if ($user['role'] !== 'accountant'): ?><small class="cell-sub"><?= e($booking['phone']) ?></small><?php endif; ?>
+                </td>
+                <td>Room <?= e($booking['room_number']) ?></td>
+                <td><?= e(date('d M Y', strtotime($booking['checkin_date']))) ?><small class="cell-sub">to <?= e(date('d M Y', strtotime($booking['checkout_date']))) ?></small></td>
+                <td><?= e(money($booking['total_amount'])) ?></td>
+                <td><span class="badge badge-<?= e($booking['status']) ?>"><?= e(status_label($booking['status'])) ?></span></td>
+                <td>
+                    <?php if (in_array($booking['status'], ['pending', 'confirmed'], true)): ?>
+                        <?php if ($user['role'] === 'accountant'): ?><span class="muted">—</span><?php else: ?>
+                        <form class="action-form" method="post">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="booking_id" value="<?= (int) $booking['id'] ?>">
+                            <?php if ($booking['status'] === 'pending'): ?>
+                                <button class="button button-small button-secondary" name="action" value="confirm">Confirm</button>
+                            <?php else: ?>
+                                <button class="button button-small button-secondary" name="action" value="check_in">Check in</button>
+                            <?php endif; ?>
+                            <button class="button button-small button-quiet" name="action" value="cancel" data-confirm="Cancel this booking?">Cancel</button>
+                        </form>
+                        <?php endif; ?>
+                    <?php elseif ($booking['status'] === 'checked_in'): ?>
+                        <?php if ($user['role'] === 'accountant'): ?><span class="muted">Read only</span><?php else: ?>
+                        <form class="action-form" method="post">
+                            <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="booking_id" value="<?= (int) $booking['id'] ?>">
+                            <select name="payment_method" aria-label="Payment method">
+                                <option value="cash">Cash</option><option value="mobile_money">Mobile Money</option><option value="card">Card</option><option value="bank">Bank</option>
+                            </select>
+                            <button class="button button-small button-primary" name="action" value="check_out">Check out & pay</button>
+                        </form>
+                        <?php endif; ?>
+                    <?php else: ?><span class="muted">—</span><?php endif; ?>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody></table></div>
+    <?php endif; ?>
+</section>
+<?php if ($user['role'] !== 'accountant'): ?>
+<section class="panel form-panel" id="new-booking">
+    <div class="panel-heading"><div><h2>Create a booking</h2><p>Enter the guest and stay details. Price is calculated automatically.</p></div></div>
+    <?php if (!$rooms): ?><div class="alert alert-error">No available rooms. Add a room or mark one as available before booking.</div><?php endif; ?>
+    <form method="post" class="form-grid" id="booking-form">
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="create">
+        <label>Guest full name<input name="full_name" maxlength="160" placeholder="Guest name" required></label>
+        <label>Telephone<input name="phone" type="tel" maxlength="40" placeholder="+250 7xx xxx xxx" required></label>
+        <label>ID or passport <span class="optional">(optional)</span><input name="id_passport" maxlength="80" placeholder="Document number"></label>
+        <label>Room<select name="room_id" id="room-id" required <?= !$rooms ? 'disabled' : '' ?>><option value="">Choose room</option><?php foreach ($rooms as $room): ?><option value="<?= (int) $room['id'] ?>" data-price="<?= e($room['price']) ?>">Room <?= e($room['room_number']) ?> · <?= e($room['room_type']) ?> (<?= e(money($room['price'])) ?>/night)</option><?php endforeach; ?></select></label>
+        <label>Check-in date<input type="date" name="checkin_date" id="checkin-date" min="<?= e(date('Y-m-d')) ?>" required></label>
+        <label>Check-out date<input type="date" name="checkout_date" id="checkout-date" min="<?= e(date('Y-m-d', strtotime('+1 day'))) ?>" required></label>
+        <label>Booking status<select name="booking_status"><option value="confirmed">Confirm now</option><option value="pending">Leave pending</option></select></label>
+        <div class="price-preview"><span>Estimated total <small id="stay-nights">Select dates and room</small></span><strong id="booking-total">— RWF</strong></div>
+        <div class="form-actions"><button class="button button-primary" type="submit" <?= !$rooms ? 'disabled' : '' ?>>Confirm booking</button></div>
+    </form>
+</section>
+<?php endif; ?>
+<?php require __DIR__ . '/includes/footer.php'; ?>
