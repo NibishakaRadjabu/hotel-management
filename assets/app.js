@@ -128,4 +128,23 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    document.querySelectorAll('[data-copy-link]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const input = document.querySelector(button.dataset.copyLink);
+            const status = button.closest('.invitation-panel')?.querySelector('[data-copy-status]');
+            if (!input || !status) return;
+
+            try {
+                await navigator.clipboard.writeText(input.value);
+                status.textContent = 'Link copied. Share it only with the invited staff member.';
+            } catch {
+                input.focus();
+                input.select();
+                status.textContent = document.execCommand('copy')
+                    ? 'Link copied. Share it only with the invited staff member.'
+                    : 'Copy failed. Select and copy the link manually.';
+            }
+        });
+    });
 });

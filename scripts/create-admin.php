@@ -35,7 +35,6 @@ try {
     $statement->execute([$fullName, $email, password_hash($temporaryPassword, PASSWORD_DEFAULT)]);
     fwrite(STDOUT, "Administrator created. Initial temporary password (shown once):\n{$temporaryPassword}\nChange it at first sign-in.\n");
 } catch (PDOException $exception) {
-    error_log('Initial administrator setup failed: ' . $exception->getMessage());
-    fwrite(STDERR, "Could not create the administrator. Check the database connection, schema, and whether the email is already in use.\n");
+    fwrite(STDERR, "Could not create the administrator: {$exception->getMessage()}\n");
     exit(1);
 }

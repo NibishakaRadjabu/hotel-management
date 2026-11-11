@@ -7,4 +7,5 @@ return [
     'db_name' => getenv('HOTEL_DB_NAME') ?: 'hotel_management',
     'db_user' => getenv('HOTEL_DB_USER') ?: 'root',
     'db_password' => getenv('HOTEL_DB_PASSWORD') ?: '',
+    'app_url' => rtrim(getenv('HOTEL_APP_URL') ?: 'http://localhost/hotel%20management', '/'),
 ];

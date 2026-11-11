@@ -11,6 +11,7 @@ A lightweight PHP 8 and MySQL starter for day-to-day hotel front-desk work. HTML
 - Responsive interface, prepared SQL statements, output escaping, and CSRF tokens.
 - Animated hotel-building loading screen with receptionist, housekeeping, chef, concierge, and manager stages on internal navigation and form submissions; supports reduced motion.
 - Individual staff accounts with admin-only staff management, role-based page/action permissions, temporary passwords, and forced password changes.
+- Admin-issued staff registration links bound to an email and role, single-use, and expiring after 48 hours.
 - Session hardening, CSRF protection, security headers, idle expiry, session revocation after resets/deactivation, and sign-in throttling.
 
 ## Setup with XAMPP
@@ -26,7 +27,7 @@ The default connection expects a local XAMPP MySQL server at `127.0.0.1:3306`, d
 
 ### Migrate an existing installation
 
-Back up the database first. For a database created from the original rooms/bookings/guests/payments schema, apply `migrations/001_expand_staff_roles.sql` once (for example, in phpMyAdmin). It adds staff/security tables, expands the role and room-status enums, and creates room assignments without deleting existing users or reservations; existing role and room data are preserved. Do not re-import the updated schema over a live database as a substitute for this migration. If there is no administrator account afterward, create one with the CLI setup command above.
+Back up the database first. For a database created from the original rooms/bookings/guests/payments schema, apply `migrations/001_expand_staff_roles.sql` once (for example, in phpMyAdmin). It adds staff/security tables, expands the role and room-status enums, and creates room assignments without deleting existing users or reservations; existing role and room data are preserved. Then apply `migrations/002_staff_registration_invites.sql` to enable invited staff registration. Do not re-import the updated schema over a live database as a substitute for these migrations. If there is no administrator account afterward, create one with the CLI setup command above.
 
 ## Staff roles
 
@@ -38,7 +39,7 @@ Back up the database first. For a database created from the original rooms/booki
 - **Chef, Restaurant Cashier, Concierge, Security Guard:** role accounts can be created, but their restaurant, guest-request, and visitor-log modules are not included yet.
 - **Accountant:** sees recorded revenue and read-only booking totals without guest contact details. Expense and salary reporting is not included yet.
 
-Admins and managers create operational staff from **Staff**. Only admins can create manager, accountant, or admin accounts. Each new account receives a cryptographically generated temporary password shown only once and must change it at first login. Disabling an account or resetting its password revokes its active sessions. The last active administrator cannot be disabled from the interface.
+Admins and managers can directly create operational staff from **Staff** using a temporary password. Admins can also generate a one-time registration link for a specific email and role; the link can be sent manually using WhatsApp, expires after 48 hours, and lets the invited person set their own password. Creating links for an email revokes any earlier unused link for that email. An invite never lets a registrant choose their email or role, and there is no open public signup. Set `HOTEL_APP_URL` to the public HTTPS base URL in a deployed environment so generated links point to the correct site. Disabling an account or resetting its password revokes its active sessions. The last active administrator cannot be disabled from the interface.
 
 ## Database structure and next modules
 
