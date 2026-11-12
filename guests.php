@@ -23,7 +23,7 @@ require __DIR__ . '/includes/layout.php';
     <?php else: ?>
         <div class="table-wrap"><table><thead><tr><th>GUEST</th><th>TELEPHONE</th><th>ID / PASSPORT</th><th>BOOKINGS</th><th>LAST CHECKOUT</th></tr></thead><tbody>
         <?php foreach ($guests as $guest): ?>
-            <tr><td><strong><?= e($guest['full_name']) ?></strong></td><td><?= e($guest['phone']) ?></td><td><?= e($guest['id_passport'] ?: '—') ?></td><td><?= (int) $guest['booking_count'] ?></td><td><?= $guest['last_checkout'] ? e(date('d M Y', strtotime($guest['last_checkout']))) : '—' ?></td></tr>
+            <tr><td><strong><?= e($guest['full_name']) ?></strong></td><td><?= e($guest['phone']) ?></td><td><?= e($guest['id_passport'] ?: '—') ?></td><td><?= (int) $guest['booking_count'] ?></td><td><?php if ($guest['last_checkout']): ?><time datetime="<?= e($guest['last_checkout']) ?>" data-localized-date data-date-format="long"><?= e(date('d M Y', strtotime($guest['last_checkout']))) ?></time><?php else: ?>—<?php endif; ?></td></tr>
         <?php endforeach; ?>
         </tbody></table></div>
     <?php endif; ?>

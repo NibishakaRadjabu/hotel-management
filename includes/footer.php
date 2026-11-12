@@ -60,6 +60,7 @@
         </div>
     </section>
 </div>
+<script src="assets/i18n.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

@@ -139,7 +139,7 @@ function current_user(): ?array
     }
 
     $statement = $pdo->prepare(
-        'SELECT id, full_name, email, role, is_active, must_change_password, session_version
+        'SELECT id, full_name, email, role, profile_image, is_active, must_change_password, session_version
          FROM users WHERE id = ?'
     );
     $statement->execute([$userId]);
@@ -203,4 +203,67 @@ function audit_event(string $eventType, ?int $targetUserId = null): void
         $eventType,
         is_string($ipAddress) ? substr($ipAddress, 0, 45) : null,
     ]);
+}
+
+function create_notification(int $userId, string $eventType, ?string $reference = null): void
+{
+    global $pdo;
+    $allowedEvents = [
+        'booking_created',
+        'booking_confirmed',
+        'guest_checked_in',
+        'checkout_payment',
+        'booking_cancelled',
+        'room_added',
+        'room_updated',
+        'staff_account_created',
+        'staff_invitation_created',
+        'staff_invitation_revoked',
+        'staff_password_reset',
+        'room_assigned',
+        'staff_account_enabled',
+        'staff_account_disabled',
+        'profile_updated',
+        'password_changed',
+        'public_booking_paid',
+        'public_payment_review',
+        'manual_payment_verified',
+        'manual_payment_rejected',
+    ];
+    if (!in_array($eventType, $allowedEvents, true)) {
+        throw new InvalidArgumentException('Unsupported notification event.');
+    }
+
+    $statement = $pdo->prepare(
+        'INSERT INTO notifications (user_id, event_type, reference_text) VALUES (?, ?, ?)'
+    );
+    $statement->execute([$userId, $eventType, $reference !== null ? substr($reference, 0, 120) : null]);
+}
+
+function notification_label(string $eventType): string
+{
+    $labels = [
+        'booking_created' => 'New booking created',
+        'booking_confirmed' => 'Booking confirmed',
+        'guest_checked_in' => 'Guest checked in',
+        'checkout_payment' => 'Checkout completed and payment recorded',
+        'booking_cancelled' => 'Booking cancelled',
+        'room_added' => 'Room added',
+        'room_updated' => 'Room details updated',
+        'staff_account_created' => 'Staff account created',
+        'staff_invitation_created' => 'Staff invitation created',
+        'staff_invitation_revoked' => 'Staff invitation revoked',
+        'staff_password_reset' => 'Staff password reset',
+        'room_assigned' => 'Room assigned',
+        'staff_account_enabled' => 'Staff account enabled',
+        'staff_account_disabled' => 'Staff account disabled',
+        'profile_updated' => 'Profile updated',
+        'password_changed' => 'Password changed',
+        'public_booking_paid' => 'Guest completed advance payment for a booking',
+        'public_payment_review' => 'Paid booking needs staff review',
+        'manual_payment_verified' => 'Mobile Money deposit verified',
+        'manual_payment_rejected' => 'Mobile Money deposit rejected',
+    ];
+
+    return $labels[$eventType] ?? 'Hotel activity';
 }

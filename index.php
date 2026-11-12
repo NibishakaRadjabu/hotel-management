@@ -1,7 +1,9 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/includes/bootstrap.php';
+require __DIR__ . '/includes/paypal.php';
 $user = require_login();
+expire_online_booking_payments();
 $role = $user['role'];
 $canSeeOperations = in_array($role, ['admin', 'manager', 'receptionist'], true);
 $canSeeFinancials = in_array($role, ['admin', 'manager', 'accountant'], true);
@@ -65,7 +67,8 @@ if ($canSeeOperations) {
 
 if ($canSeeFinancials) {
     $revenueStatement = $pdo->prepare(
-        'SELECT COALESCE(SUM(amount), 0) FROM payments WHERE DATE(payment_date) = ?'
+        "SELECT COALESCE(SUM(amount), 0) FROM payments
+         WHERE DATE(payment_date) = ? AND payment_method <> 'test'"
     );
     $revenueStatement->execute([$today]);
     $revenueToday = (float) $revenueStatement->fetchColumn();
@@ -140,7 +143,7 @@ require __DIR__ . '/includes/layout.php';
             <tr>
                 <td><strong><?= e($booking['full_name']) ?></strong><small class="cell-sub">Booking #<?= (int) $booking['id'] ?></small></td>
                 <td>Room <?= e($booking['room_number']) ?></td>
-                <td><?= e(date('d M', strtotime($booking['checkin_date']))) ?> – <?= e(date('d M Y', strtotime($booking['checkout_date']))) ?></td>
+                <td><time datetime="<?= e($booking['checkin_date']) ?>" data-localized-date data-date-format="short"><?= e(date('d M', strtotime($booking['checkin_date']))) ?></time> – <time datetime="<?= e($booking['checkout_date']) ?>" data-localized-date data-date-format="long"><?= e(date('d M Y', strtotime($booking['checkout_date']))) ?></time></td>
                 <td><?= e(money($booking['total_amount'])) ?></td>
                 <td><span class="badge badge-<?= e($booking['status']) ?>"><?= e(status_label($booking['status'])) ?></span></td>
             </tr>

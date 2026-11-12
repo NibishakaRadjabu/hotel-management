@@ -79,6 +79,11 @@ unset($_SESSION['flash']);
 </head>
 <body class="auth-page">
     <main class="auth-card">
+        <label class="language-control auth-language-control"><span>Language</span><select id="language-select">
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="sw">Kiswahili</option>
+        </select></label>
         <a class="brand auth-brand" href="login.php"><span class="brand-mark">S</span><span>SmartHotel<small>MANAGEMENT</small></span></a>
         <p class="eyebrow">STAFF ACCESS</p>
         <h1>Welcome back</h1>
@@ -92,6 +97,9 @@ unset($_SESSION['flash']);
             <button type="submit" class="button button-primary">Sign in securely</button>
         </form>
         <p class="auth-security">Staff accounts only · Sessions expire after 20 minutes of inactivity</p>
+        <p class="public-booking-prompt">Planning a visit? <a href="stay.php">Browse rooms and book online</a>.</p>
     </main>
+<script src="assets/i18n.js"></script>
+<script src="assets/app.js"></script>
 </body>
 </html>

@@ -34,6 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $statement = $pdo->prepare('INSERT INTO rooms (room_number, room_type, floor, price) VALUES (?, ?, ?, ?)');
                 $statement->execute([$roomNumber, $roomType, $floor, $price]);
+                create_notification((int) $user['id'], 'room_added', 'Room ' . $roomNumber);
                 flash('Room added successfully.');
             } catch (PDOException $exception) {
                 if ($exception->getCode() === '23000') {
@@ -82,6 +83,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $parameters[] = $user['id'];
                 }
                 $statement->execute($parameters);
+            }
+            if ($statement->rowCount()) {
+                $roomReference = $pdo->prepare('SELECT room_number FROM rooms WHERE id = ?');
+                $roomReference->execute([$roomId]);
+                create_notification((int) $user['id'], 'room_updated', 'Room ' . $roomReference->fetchColumn());
             }
             flash($statement->rowCount() ? 'Room details updated.' : 'Room is occupied or no changes were made.', $statement->rowCount() ? 'success' : 'error');
         }

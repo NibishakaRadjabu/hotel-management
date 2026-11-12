@@ -57,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $user['id'],
                 ]);
                 audit_event('staff.created', (int) $pdo->lastInsertId());
+                create_notification((int) $user['id'], 'staff_account_created', $email);
                 flash('Staff account created. Share this temporary password once: ' . $password);
             } catch (PDOException $exception) {
                 if ($exception->getCode() === '23000') {
@@ -97,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                     $invitation->execute([hash('sha256', $token), $email, $role, $user['id']]);
                     audit_event('staff.invitation_created');
+                    create_notification((int) $user['id'], 'staff_invitation_created', $email);
                     $pdo->commit();
 
                     $_SESSION['new_invitation'] = [
@@ -129,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $revoke->execute([$invitationId]);
             if ($revoke->rowCount()) {
                 audit_event('staff.invitation_revoked');
+                create_notification((int) $user['id'], 'staff_invitation_revoked', 'Invitation #' . $invitationId);
                 flash('Registration link revoked.');
             } else {
                 flash('That link is already expired, used, or revoked.', 'error');
@@ -155,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $statement->execute([password_hash($password, PASSWORD_DEFAULT), $staffId]);
                 audit_event('staff.password_reset', $staffId);
+                create_notification((int) $user['id'], 'staff_password_reset', 'Staff account #' . $staffId);
                 flash('Password reset. All prior sessions were revoked. Share this temporary password once: ' . $password);
             }
         }
@@ -172,6 +176,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  ON DUPLICATE KEY UPDATE assigned_by = VALUES(assigned_by), assigned_at = CURRENT_TIMESTAMP"
             );
             $assignment->execute([$user['id'], $staffId, $roomId]);
+            if ($assignment->rowCount()) {
+                $roomReference = $pdo->prepare('SELECT room_number FROM rooms WHERE id = ?');
+                $roomReference->execute([$roomId]);
+                create_notification((int) $user['id'], 'room_assigned', 'Room ' . $roomReference->fetchColumn());
+            }
             flash($assignment->rowCount() ? 'Room assigned to the housekeeper.' : 'Choose an active housekeeper and a valid room.', $assignment->rowCount() ? 'success' : 'error');
         }
     } elseif ($action === 'set_active') {
@@ -206,6 +215,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->commit();
                     if ($change->rowCount()) {
                         audit_event($active ? 'staff.enabled' : 'staff.disabled', $staffId);
+                        create_notification(
+                            (int) $user['id'],
+                            $active ? 'staff_account_enabled' : 'staff_account_disabled',
+                            'Staff account #' . $staffId
+                        );
                         flash($active ? 'Staff account reactivated. Ask them to sign in again.' : 'Staff account disabled; existing sessions were revoked.');
                     } else {
                         flash('Staff account status was unchanged.');
@@ -272,7 +286,7 @@ require __DIR__ . '/includes/layout.php';
             <td><?= e($roles[$member['role']] ?? status_label($member['role'])) ?></td>
             <td><?= e($member['assigned_rooms'] ?: '—') ?></td>
             <td><span class="badge <?= $member['is_active'] ? 'badge-checked_out' : 'badge-cancelled' ?>"><?= $member['is_active'] ? 'Active' : 'Disabled' ?></span></td>
-            <td><?= e(date('d M Y', strtotime($member['created_at']))) ?></td>
+            <td><time datetime="<?= e(date('Y-m-d', strtotime($member['created_at']))) ?>" data-localized-date data-date-format="long"><?= e(date('d M Y', strtotime($member['created_at']))) ?></time></td>
             <td>
                 <?php if ((int) $member['id'] !== (int) $user['id']): ?>
                     <div class="action-form">
@@ -307,7 +321,7 @@ require __DIR__ . '/includes/layout.php';
             <tr>
                 <td><?= e($invitation['email']) ?></td>
                 <td><?= e($roles[$invitation['role']] ?? status_label($invitation['role'])) ?></td>
-                <td><?= e(date('d M Y H:i', strtotime($invitation['expires_at']))) ?></td>
+                <td><time datetime="<?= e(date('Y-m-d', strtotime($invitation['expires_at']))) ?>" data-localized-date data-date-format="datetime"><?= e(date('d M Y H:i', strtotime($invitation['expires_at']))) ?></time></td>
                 <td><form method="post">
                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                     <input type="hidden" name="action" value="revoke_invitation">

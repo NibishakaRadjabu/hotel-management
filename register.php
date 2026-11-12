@@ -100,6 +100,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body class="auth-page">
     <main class="auth-card">
+        <label class="language-control auth-language-control"><span>Language</span><select id="language-select">
+            <option value="en">English</option>
+            <option value="fr">Français</option>
+            <option value="sw">Kiswahili</option>
+        </select></label>
         <a class="brand auth-brand" href="login.php"><span class="brand-mark">S</span><span>SmartHotel<small>MANAGEMENT</small></span></a>
         <p class="eyebrow">INVITED STAFF REGISTRATION</p>
         <?php if (!$invitation): ?>
@@ -122,5 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         <?php endif; ?>
     </main>
+<script src="assets/i18n.js"></script>
+<script src="assets/app.js"></script>
 </body>
 </html>
